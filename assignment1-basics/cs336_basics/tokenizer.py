@@ -11,42 +11,52 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
         self.special_tokens = special_tokens or []
+        sorted_tokens = sorted(self.special_tokens, key=len, reverse=True)
+        #对每个token做re.escape
+        self.special_pattern = "(" + "|".join(re.escape(t) for t in sorted_tokens) + ")"
         self.byte_to_id = {v: k for k,v in vocab.items()}
         self.merge_ranks = {pair : i for i, pair in enumerate(merges)}
     def encode(self, text) -> list[int]:
         token_id = []
-        if not self.special_tokens:
-            parts = [text]
+        if len(self.special_tokens) == 0:
+            for chunk in self.pretokenize(text):
+                pieces = self.apply_merges(chunk)
+                token_id.extend([self.byte_to_id[p] for p in pieces])
         else:
-            pattern = "|".join(re.escape(token) for token in self.special_tokens)
-            parts = re.split(pattern, text)
-        for part in parts:
-            if part is None:
-                continue
-            byte_words = self.pretokenize(part)
-            pieces = self.apply_merges(byte_words)
-            token_id.extend([self.byte_to_id[p] for p in pieces])
+            #pattern = "|".join(re.escape(token) for token in self.special_tokens)
+            parts = re.split(self.special_pattern, text)
+            for part in parts:
+                if part is None:
+                    continue
+                if part in self.special_tokens:
+                    token_id.append(self.byte_to_id[part.encode('utf-8')])
+                else:
+                    for chunk in self.pretokenize(part):
+                        pieces = self.apply_merges(chunk)
+                        token_id.extend([self.byte_to_id[p] for p in pieces])
         return token_id
 
     # 按照merges的顺序合并
     def pretokenize(self, text):
-        byte_words = []
+        all_trunks = []
         for match in re.finditer(GPT2_PATTERN, text):
             token = match.group(0)
             token_bytes = token.encode('utf-8')
+            chunk = []
             # byte_word = tuple(bytes([b]) for b in token_bytes)
             for b in token_bytes:
-                byte_words.append(bytes([b]))
-        print(f"DEBUG: pretokenize 返回的是: {byte_words}")
-        return byte_words
+                chunk.append(bytes([b]))
+            all_trunks.append(chunk)
+        #print(f"DEBUG: pretokenize 返回的是: {all_trunks}")
+        return all_trunks
 
     def apply_merges(self, pieces):
         #使用merge ranks快速查找优先级
         #遍历pieces中的pair, 获得其在merge_ranks里面的rank值，有则返回最小的rank，没有则返回inf
         # 得到排序后的pair，进行合并，并更新pair
-        print(f"Deubug: 当前pieces是：{pieces}")
+        #print(f"Deubug: 当前pieces是：{pieces}")
         while len(pieces) > 1:
-            print(f"Deubug: 当前pieces是：{pieces}")
+            #print(f"Deubug: 当前pieces是：{pieces}")
             pairs = [(pieces[i], pieces[i+1]) for i in range(len(pieces) - 1)]
             best_pair = min(pairs, key = lambda p : self.merge_ranks.get(p, float('inf'))) 
             # 若返回的pair的rank值为inf，要么该pair不合法要么已经合并到尽头
@@ -69,9 +79,9 @@ class BPETokenizer:
 
     def decode(self, token_ids) -> str:
         pieces =  [self.vocab [i] for i in token_ids]
-        return b"".join(pieces).decode("utf-8")
-    def encode_iterable(self, Interator) -> Iterator[int]:
-        for chunk in Iterator:
+        return b"".join(pieces).decode("utf-8", errors="replace")
+    def encode_iterable(self, iterator) -> Iterator[int]:
+        for chunk in iterator:
             yield from self.encode(chunk)
  
 if __name__ == "__main__":
@@ -82,4 +92,4 @@ if __name__ == "__main__":
     # 2. 实例化你的 Tokenizer
     tokenizer = BPETokenizer(vocab, merges)
     # 3. 执行测试
-    print(tokenizer.encode("hello"))
+    #print(tokenizer.encode("hello"))
