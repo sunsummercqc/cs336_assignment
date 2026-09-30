@@ -92,4 +92,4 @@ if __name__ == "__main__":
     # 2. 实例化你的 Tokenizer
     tokenizer = BPETokenizer(vocab, merges)
     # 3. 执行测试
-    #print(tokenizer.encode("hello"))
+    print(tokenizer.encode("hello"))

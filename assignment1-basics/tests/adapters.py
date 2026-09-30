@@ -11,7 +11,7 @@ from torch import Tensor
 from cs336_basics.BPE import train_bpe
 from cs336_basics.tokenizer import BPETokenizer
 from cs336_basics.model import Linear
-from cs336_basics.model import Embedding,RMSNorm, RotaryPositionalEmbedding
+from cs336_basics.model import Embedding,RMSNorm, RotaryPositionalEmbedding, Swiglu, scaled_dot_product_attention
 
 def run_linear(
     d_in: int,
@@ -89,8 +89,11 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
-
+    swiglu = Swiglu(d_model, d_ff)
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
+    return swiglu(in_features)
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -110,7 +113,9 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    scale_dot = scaled_dot_product_attention()
+    output = scale_dot(Q, K, V, mask)
+    return output
 
 
 def run_multihead_self_attention(
