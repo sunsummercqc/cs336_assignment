@@ -48,6 +48,7 @@ class Swiglu(nn.Module):
         
 
 class RotaryPositionalEmbedding(nn.Module):
+    #原理：
     def __init__(self, theta, d_k, max_seq_len, device=None):
         super().__init__()
         # 0～ d_k/2-1 之间的频率
@@ -82,37 +83,65 @@ class scaled_dot_product_attention(nn.Module):
     def forward(self, Q, K, V, mask): 
         # Q(...,q,d_k) , K (..., k, d_k)
         # 计算score (...,q,k)
-        score = Q@K.transpose(-1,-2)/(Q.size(-1)) ** 0.5
+        # 根号d_k 缩放的作用：防止点积过大导致softmax输出过于尖锐
+        score = Q@K.transpose(-1,-2)/ ((Q.size(-1)) ** 0.5)
         # 若掩码非空，mask中为t的表示可以看的，为false是需要掩盖的，后续需要把这部分赋值为-inf， 将非空掩码反转,并赋值-inf
+        #以下是取反后的值 
         # [t,t,t]
         # [f,t,t]
         # [f,f,t]
         #torch.masked_fill(input, mask, value)
         if mask is not None:
             score = score.masked_fill(~mask, float('-inf'))
+        #沿最后一维做softmax
         weight = torch.softmax(score, dim = -1) @ V
         return weight
 
 class MultiheadSelfAttention(nn.Module):
     #多头注意力机制 每个头独自计算sdpa 然后再concat
     # 计算投影 q k v , 计算 attention
-    def __init__(self, d_model, h):
+    def __init__(self, d_model, h,max_seq_len=None, theta=None, device=None, dtype=None):
         super().__init__()
-        # q,k,v,o
-        self.d_k = self.d_model / self.h
-        self.q = Linear(d_model, d_model)
-        self.k = Linear(d_model, d_model)
-        self.v = Linear(d_model, d_model)
+        # q,k,v,oNone
+        self.d_model = d_model
+        self.h = h
+        self.d_k = self.d_model // self.h
+        self.q = Linear(self.d_model, self.d_model)
+        self.k = Linear(self.d_model, self.d_model)
+        self.v = Linear(self.d_model, self.d_model)
         # o
-        self.o = Linear (d_model, d_model)
+        self.o = Linear (self.d_model, self.d_model)
+        #给 q k加上旋转矩阵
+        if theta is not None and max_seq_len is not None:
+            self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len, device=device)
+        else:
+            self.rope = None
+        self.attention = scaled_dot_product_attention(device=device, dtype=dtype)
         
-    def forward(self, x):
-        Q = self.q.weight.T @ x
-        K = self.k.weight.T @ x
-        V = self.v.weight.T @ x
-        mask = 
-        attention = scaled_dot_product_attention()
-        score = attention(Q, K, V, mask)
+        
+    def forward(self, x, token_positions=None):
+        Q = self.q(x)
+        K = self.k(x)
+        V = self.v(x)
+        # 拆头Q （batch, seq_len, d_model) -> (batch, h, seq_len, d_k)
+        # reshape 和transpose的区别是什么 
+        Q = Q.reshape(Q.size(0), Q.size(1), self.h, self.d_k).transpose(1, 2)
+        K = K.reshape(K.size(0), K.size(1), self.h, self.d_k).transpose(1, 2)
+        V = V.reshape(V.size(0), V.size(1), self.h, self.d_k).transpose(1, 2)
+        # q k 加上旋转矩阵,token_position怎么找
+        if self.rope:
+            if token_positions is None:
+                token_positions = torch.arange(x.size(1), device=x.device)
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
+        # 计算掩码
+        mask = torch.tril(torch.ones((x.size(1), x.size(1)), device=x.device)).bool()
+        # 计算 scaled dot product attention
+        # 合并头
+        # self.o输出投影 score (b, h, s, d_k) -> (b, s, h, d_k) -> (b, q, d_model)
+        score = self.attention(Q, K, V, mask)
+        score = score.transpose(1, 2).reshape(score.size(0), score.size(2), self.d_model)
+        return self.o(score)
 
 
 
